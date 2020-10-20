@@ -1,21 +1,29 @@
-FROM etherpad/etherpad:1.8.6
+FROM node:12-alpine
 
-USER root
-
-# install etherpad plugins
-# - ep_delete_after_delay_lite
-# - ep_redis_publisher
-RUN apt-get update \
-    && apt-get install -y git \
-    && npm install ep_delete_after_delay_lite  git+https://git@github.com/pedrobmarin/ep_redis_publisher.git
-
-# apply "Including more data at pad update event"
-# https://github.com/mconf/etherpad-lite/commit/5bc37fc92714e82165386dc0a5dd467609169a87
-# this is a necessary patch for the closed captions
-RUN sed -i "s|hooks\.callAll(\"padUpdate\".*)|hooks\.callAll(\"padUpdate\", {'pad':this, 'author': author, 'revs': newRev, 'changeset': aChangeset});|" /opt/etherpad-lite/src/node/db/Pad.js
-
-COPY settings.json /opt/etherpad-lite/settings.json
-COPY entrypoint.sh /entrypoint.sh
+RUN addgroup -g 5001 etherpad && adduser -D -u 5001 -G etherpad etherpad \
+    && apk add git \
+    && chown etherpad:0 /opt
 
 USER etherpad
+
+# clone specific git commit
+ENV COMMIT 96e7ea5e54e4752aabb12c5476745ce124c71f4c
+RUN cd /opt \
+    && git clone --depth=1 https://github.com/bigbluebutton/etherpad-lite.git \
+    && cd /opt/etherpad-lite \
+    && git fetch --depth 1 origin $COMMIT \
+    && git checkout $COMMIT
+
+WORKDIR /opt/etherpad-lite
+
+# install node dependencies for Etherpad
+RUN bin/installDeps.sh && \
+	rm -rf ~/.npm/_cacache
+
+# install plugins
+RUN npm install ep_delete_after_delay_lite  git+https://git@github.com/pedrobmarin/ep_redis_publisher.git
+
+COPY --chown=etherpad:0 settings.json /opt/etherpad-lite/settings.json
+COPY entrypoint.sh /entrypoint.sh
+
 ENTRYPOINT ["/entrypoint.sh"]
